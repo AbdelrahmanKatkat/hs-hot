@@ -106,8 +106,8 @@ recipe that won on validation (Theory section 13):
 | Setting | Default | Note |
 |---|---|---|
 | Encoder weights | torchvision ResNet-50, ImageNet V2 (`weights/resnet50_imagenet1k_v2.pth`) | V1 weights scored the same (0.437 against 0.438) |
-| Scale | `model_gsd_m=0.30` | the native resolution: a Freetown chip enters at 256 px; 0.15 m (2x) was slightly worse and slower |
-| Encoder training | the whole encoder trains at a tenth of the head's rate (`freeze_encoder=false`, `encoder_lr_factor=0.1`) | BatchNorm of the encoder stays in eval mode (not measured); `unfreeze_from=layer3` gave the same score within noise |
+| Scale | `model_gsd_m=0.30` | the native resolution: a Freetown chip enters at 256 px; a 2x finer scale was slightly worse and slower |
+| Encoder training | the whole encoder trains at a tenth of the head's rate (`freeze_encoder=false`, `encoder_lr_factor=0.1`) | BatchNorm of the encoder stays in eval mode (not measured); `freeze_encoder=true` freezes all of it; `unfreeze_from=layer3` (or `layer4`) freezes the encoder except those stages and the deeper ones, and gave the same score within noise (`layer3`) |
 | Optimiser | AdamW 1e-3, weight decay 1e-4, cosine, clip 1.0, Dice weight 1.0 | carried over as a starting point, not swept on this dataset |
 | Length | `epochs=10`, `epoch_fraction=0.1`, `batch_size=4` | ten epochs of a random tenth of the chips are one pass over the data; 20 epochs did not help |
 | Augmentation | none (`orientation=none`, `photometric=0`, `scale_jitter=0`, `degrade_prob=0`) | rotation and mirror did not help on a frozen encoder |

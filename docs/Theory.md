@@ -78,9 +78,8 @@ input size = round(chip size * scale)                                           
 **Why 0.30 m.** The Guru highways chips are zoom 19: 0.30 m per pixel at Freetown and Nairobi (94% of the tiles with Freetown alone) and
 0.25 m at Stellenbosch. The encoder is an ImageNet ResNet-50, which has no ground scale of its own, so there is no
 reason to resample: the starting point is the native resolution, scale 1.0 for Freetown (a 256 px chip, a 6 m band 20 px wide) and 0.83
-for Stellenbosch. A finer scale was tried and did not help (section 12, trial T5: 0.15 m, 2x upsampling, IoU 0.430 against 0.438 and about
-1.8 times the training time). The first default of this library, 0.15 m, was carried over from the tree model, whose NEON encoder was
-trained at 0.05 m; that reasoning does not apply here.
+for Stellenbosch. A finer scale was tried and did not help (section 12, trial T5: 2x upsampling, IoU 0.430 against 0.438 and about
+1.8 times the training time).
 
 The same parameter, `model_gsd_m`, must be used for training, scoring and serving. At zoom 19 and 0.30 m the scaled chip stays far below
 the 1024 px cap; zoom 18 would scale about 2 times and is not measured.
@@ -98,7 +97,7 @@ ONNX graph that a CPU serving image can run with no torch installed:
   float32 in [0, 1]. Normalisation (ImageNet), the network and the sigmoid are inside the graph.
 - The tunable steps (threshold, tracing, minimum area, simplification) are outside the graph.
 - **Why ImageNet.** It is a public starting point with no tie to another task The licence of the ImageNet-trained weights has not been
-  reviewed. An encoder pretrained on tree crowns (NEON forestry imagery) could be used instead; it has not been tried.
+  reviewed.
 
 ## 5. Inference and postprocessing
 
@@ -130,7 +129,7 @@ Keys are bare; fAIr strips the `training.` and `inference.` prefixes. `parse_*` 
 | `simplify_px` | 1.0 | Douglas-Peucker tolerance in model-input pixels |
 | `smooth_sigma_px`, `open_px`, `close_px`, `fill_holes_px` | 0 | optional cleanups, off |
 | `epochs`, `batch_size`, `learning_rate` | 10, 4, 1e-3 | training; AdamW, cosine, clip 1.0, weight decay 1e-4 |
-| `freeze_encoder`, `unfreeze_from`, `encoder_lr_factor` | false, `none`, 0.1 | the whole encoder trains at a tenth of the head's rate; `freeze_encoder=true` freezes it except `layer4` (or the stages `unfreeze_from` names); encoder BatchNorm stays in eval mode |
+| `freeze_encoder`, `unfreeze_from`, `encoder_lr_factor` | false, `none`, 0.1 | the whole encoder trains at a tenth of the head's rate; `freeze_encoder=true` freezes all of it; `unfreeze_from` (`layer1` to `layer4`) freezes it except that stage and the deeper ones (naming it without `freeze_encoder` implies the freeze); encoder BatchNorm stays in eval mode |
 | `epoch_fraction` | 0.1 | each epoch uses a fresh random tenth of the chips |
 | `dice_weight` | 1.0 | Dice term next to the binary cross-entropy |
 | `orientation`, `photometric`, `scale_jitter`, `degrade_prob` | none, 0, 0, 0 | augmentation, all off (section 9) |
@@ -195,7 +194,7 @@ always), minimises binary cross-entropy plus Dice on the non-ignored pixels with
 `epoch_fraction` of the chips per epoch, keeps the best epoch by validation loss, and writes `<name>.pt`, `<name>.onnx`, `train.log`,
 `history.json` and one checkpoint per epoch. Scoring (`evaluate.py`) is pixel precision, recall, F1 and IoU of the road class at a list of
 thresholds, on the torch model or on the exported ONNX. Chips of different projects scale to different sizes (504 px at 0.30 m and
-423 px at 0.25 m were seen at the old 0.15 m scale), so batches are padded with `IGNORE` (`pad_to_largest`).
+423 px at 0.25 m were seen at a 2x finer scale), so batches are padded with `IGNORE` (`pad_to_largest`).
 
 ## 12. Results
 
@@ -211,7 +210,7 @@ IoU by at least 0.01. The test split was not looked at until the final model was
 | **T2** | **the whole encoder trains (a tenth of the rate)** | **0.465** | **0.635** | **0.3** | **+0.027: helps; chosen** |
 | T3 | 20 epochs instead of 10 | 0.439 | 0.610 | 0.5 | +0.001: no gain (best epoch 18 of 20) |
 | T4 | orientation augmentation (`dihedral`) | 0.434 | 0.606 | 0.5 | -0.004: no gain |
-| T5 | `model_gsd_m` 0.15 (2x upsampling) | 0.430 | 0.601 | 0.5 | -0.008: no gain, 18 min against about 10 |
+| T5 | a 2x finer scale (upsampling) | 0.430 | 0.601 | 0.5 | -0.008: no gain, 18 min against about 10 |
 | T6 | ImageNet V1 weights instead of V2 | 0.437 | 0.609 | 0.4 | -0.001: same |
 
 What it says. With most of the encoder frozen the model was limited by its features, not by training length (T3): letting the encoder adapt
