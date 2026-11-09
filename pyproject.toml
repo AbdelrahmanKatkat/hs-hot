@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hs-hot"
+version = "0.1.0"
+description = "Reusable highway (road) semantic segmentation helpers (U-Net on an ImageNet ResNet-50 encoder) for HOT fAIr model onboarding."
+readme = "README.md"
+requires-python = ">=3.12"
+# Inference core only (the CPU serving image installs just this plus onnxruntime, which the fAIr serving
+# base provides): numpy/Pillow for preprocessing, rasterio/pyproj for georeferencing. No torch.
+dependencies = [
+    "numpy>=1.26",
+    "Pillow>=10.0",
+    "pyproj>=3.6",
+    "rasterio>=1.3",
+]
+
+[project.optional-dependencies]
+# What the fAIr training image installs: fine-tuning, evaluation and ONNX export. Training runs on a GPU, but
+# the CUDA build of torch is chosen by the image (a CUDA wheel index), not by this metadata, so torch stays
+# a plain requirement here. `onnxscript` is not needed: the export uses the legacy exporter.
+train = [
+    "onnx>=1.17",
+    "torch>=2.4",
+    "torchvision>=0.19",
+]
+# Run an exported ONNX locally. The fAIr serving base brings its own onnxruntime.
+infer = [
+    "onnxruntime>=1.18",
+]
+test = [
+    "onnxruntime>=1.18",
+    "pytest>=8.0",
+]
+# Building and analysing datasets in this repository only (`research/analysis`): Hugging Face dataset loading.
+# fAIr-models does not use Hugging Face and must never install this extra.
+dataprep = [
+    "datasets>=5.1.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hs_hot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Integration tests need local weights + the `train` extra; run with `-m integration`.
+addopts = "-m 'not integration'"
+markers = ["integration: needs weights/resnet50_imagenet1k_v2.pth and the train extra (opt-in)"]
+
+[tool.ruff]
+line-length = 110
