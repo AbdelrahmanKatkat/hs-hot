@@ -37,7 +37,8 @@ border comes back as two polygons.
 | *(none)* | numpy, Pillow, pyproj, rasterio. **No torch.** | the CPU inference image (plus `onnxruntime`, which the fAIr serving base provides) |
 | `train` | torch, torchvision, onnx: fine-tuning, evaluation and ONNX export | the fAIr **GPU** training image |
 | `infer` | onnxruntime | running an exported ONNX locally (`scripts/predict.py`) |
-| `test` | onnxruntime, pytest | CI |
+| `centreline` | scikit-image, scipy: thinning a road mask to a line and scoring lines with a distance tolerance (`hs_hot.centreline`, `hs_hot.evaluate_centreline`) | anyone who judges roads as centrelines; not the polygon path, not serving |
+| `test` | onnxruntime, pytest, scikit-image, scipy | CI |
 | `dataprep` | datasets (Hugging Face) | **this repository only** (`research/`); fAIr-models must never install it |
 
 Training always runs on a GPU, but the CUDA build of torch is chosen by the image (for example
@@ -69,6 +70,7 @@ network and the sigmoid are inside the graph; the threshold and the polygon step
 | `export.py` | `build_unet` (owns the checkpoints), `probability_network`, the ONNX export (`train`) |
 | `segmentation_dataset.py`, `train.py` | chips + labels as a torch dataset; fine-tuning (`train`) |
 | `evaluate.py` | pixel precision / recall / F1 / IoU, threshold sweep (torch only for `score_dataset`) |
+| `centreline.py`, `evaluate_centreline.py` | roads as lines (`centreline` extra, imported explicitly, not exported from `hs_hot`): `thin_to_centreline` (mask to a one-pixel line), `widen_centreline`, and the tolerance scores `Tally` (precision / recall / F1 / quality / IoU of widened lines within `r` metres, Theory section 13) |
 
 `unet`, `export`, `segmentation_dataset` and `train` need the `train` extra and are imported explicitly (`from hs_hot.train import ...`);
 `import hs_hot`, `serve`, `evaluate`, `decode` and `export` never load torch until a function that needs it is called.
@@ -101,7 +103,7 @@ at pixel IoU 0.952, drawing 2.4% fewer road pixels (Theory section 2).
 
 The dataset is `hotosm/fAIr-guru-td-highways`: 12,880 tiles of 256 px at zoom 19 (0.25 to 0.30 m per pixel), split by region into train
 10,253, validation 1,717 and test 910, from three Tasking Manager projects (Freetown, Nairobi, Stellenbosch). The defaults below are the
-recipe that won on validation (Theory section 13):
+recipe that won on validation (Theory section 12):
 
 | Setting | Default | Note |
 |---|---|---|
@@ -121,6 +123,27 @@ are unmapped, so these are lower bounds on how well roads are found):
 | train | 10,253 | 0.668 | 0.693 | 0.680 | 0.515 |
 | validation | 1,717 | 0.613 | 0.659 | 0.635 | 0.465 |
 | test | 910 | 0.637 | 0.700 | 0.667 | 0.500 |
+
+### Centreline scoring (research, validation only)
+
+The library returns polygon bands. If roads are scored as centrelines instead, the band is thinned to a line and compared with the OSM
+centreline within a tolerance `r` (a point matches if the other line passes within `r` metres, on either side). Validation, threshold 0.3,
+F1 of the thinned line (Theory section 13 has precision, recall, quality, the IoU of widened lines, the reference rows and the method):
+
+| Tolerance r | 0.5 m | 1 m | 2 m | 3 m |
+|---|---|---|---|---|
+| Band model (the final model above), thinned | 0.228 | 0.420 | 0.610 | 0.702 |
+| Narrow-target model (trained on a 2 m strip), thinned | 0.243 | 0.439 | 0.626 | 0.711 |
+| 3-pixel model (0.9 m strip), thinned, threshold 0.02 | 0.234 | 0.423 | 0.608 | 0.695 |
+| 1-pixel model (0.3 m line), thinned, threshold 0.02 | 0.207 | 0.379 | 0.551 | 0.636 |
+| Perfect 6 m band, thinned (ceiling of this route) | 0.840 | 0.900 | 0.954 | 0.975 |
+
+The 6 m, 2 m and 0.9 m models are within noise of one another (one seed, gaps near 0.01 to 0.02); the 1-pixel line is clearly worse.
+Thin targets need a far lower threshold (0.02): at 0.3 the 3-pixel model drops to 0.414 and the 1-pixel model to 0.360 at 1 m. An IoU on lines widened by 1 m is much
+harsher: about 0.24 for both models, 0.54 for the OSM line moved by 1 m. The thinning and the scoring are in `src/`
+(`hs_hot.centreline`, `hs_hot.evaluate_centreline`, `centreline` extra, with tests); the experiments are in `research/`:
+`analysis/centreline_eval.py`, `train_T7.py` (any label width: `--half-width-m`), `zindi/baseline_centreline.py` (draft; its `.ipynb`
+was not executed). The library does not output centrelines yet: the pack-facing output is still polygon bands.
 
 ## From a pipeline step (what a fAIr-models pack calls)
 

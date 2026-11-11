@@ -30,9 +30,17 @@ train = [
 infer = [
     "onnxruntime>=1.18",
 ]
+# Roads as centrelines (`hs_hot.centreline`, `hs_hot.evaluate_centreline`): thinning a mask to a line and scoring lines with a distance
+# tolerance. Not needed for the polygon path or for serving. The floors are the versions this was tested with.
+centreline = [
+    "scikit-image>=0.26",
+    "scipy>=1.18",
+]
 test = [
     "onnxruntime>=1.18",
     "pytest>=8.0",
+    "scikit-image>=0.26",
+    "scipy>=1.18",
 ]
 # Building and analysing datasets in this repository only (`research/analysis`): Hugging Face dataset loading.
 # fAIr-models does not use Hugging Face and must never install this extra.

@@ -14,6 +14,7 @@ The design contract of the `hs-hot` library: what the model takes in, what it re
 | Dataset | `hotosm/fAIr-guru-td-highways`: 12,880 tiles, zoom 19, already split by region (section 10) |
 | Runtime | Training on a GPU with torch; inference on a CPU with `onnxruntime`, no torch |
 | Result (2026-11-09) | Whole encoder fine-tuned at a tenth of the head's rate, threshold 0.3: pixel **IoU 0.465 / F1 0.635 on validation, IoU 0.500 / F1 0.667 on test** (test scored once, one seed; section 12) |
+| Centreline scoring (2026-11-10) | Thinned to a line, the final model scores tolerance F1 0.42 at 1 m, 0.61 at 2 m and 0.70 at 3 m on validation; models trained on a 2 m or a 0.9 m strip are within noise of it, a 0.3 m line is worse (section 13). Thinning and scoring are in `hs_hot.centreline` / `hs_hot.evaluate_centreline` (`centreline` extra); the experiments are in `research/`, validation only |
 | Status | Library, tests (139 passing), dataset export, mask check, tuning trials and the final scores done. Not done: a pack, a release tag, object-level scores, a DINOv3 backbone |
 
 ## 1. Task and output contract
@@ -155,7 +156,7 @@ match the dataset's at pixel IoU 0.952 (section 2); the trials and final scores 
 - whether a trainable encoder BatchNorm helps (it is held in eval mode by default; no trial, the switch was removed);
 - whether a tree-detector encoder or DINOv3 beats ImageNet initialisation;
 - the padding test (a chip whose size is not a multiple of 32), a self-intersection check on the polygons, a hand-checked sample of test
-  chips, an object-level (per road) score, a tolerance (buffered) pixel score, a ground-truth check of the band width, and zoom 18 behaviour;
+  chips, an object-level (per road) score, a tolerance score on the polygon bands (measured on thinned centrelines only, section 13), a ground-truth check of the band width, and zoom 18 behaviour;
 - how much of the error is unlabelled roads (project 60363 vs the other two) rather than model error, and a second seed.
 
 ## 9. Augmentation
@@ -235,6 +236,134 @@ over the labels in blue, a red frame on chips with no label) were written for th
 sample and are not the split scores above.
 
 **Not measured:** the postprocess sweep on polygons, object-level (per road) scores, per-project scores (Freetown is 94% of the tiles),
-a second seed, a trainable encoder BatchNorm, orientation together with a trainable encoder, and a tolerance score that does not count a
-prediction a few pixels off the label as an error.
+a second seed, a trainable encoder BatchNorm, orientation together with a trainable encoder, and a tolerance score for the polygon bands
+(a tolerance score for thinned centrelines is in section 13).
+
+## 13. Centreline scoring (2026-11-10, validation only)
+
+Why: a challenge may score road **centrelines** (the OSM line with a buffer) instead of 6 m bands. The library returns bands, so this section
+measures what happens when the band is thinned to a line, how the scores move with the tolerance, and whether training on a narrower target
+helps. The thinning and the scoring are in the library (`hs_hot.centreline`, `hs_hot.evaluate_centreline`, `centreline` extra, tests in
+`tests/test_centreline.py`; not exported from `hs_hot`, no default changed); the experiments are in `research/`
+(`analysis/centreline_lib.py`, `analysis/centreline_eval.py`, `train_T7.py`, which takes any label width with `--half-width-m`).
+Validation split only (1,717 chips); the test split was not used. One seed.
+
+**Models compared.** Same recipe as section 12 (whole encoder trains, 10 epochs of a tenth of the chips); only the training target differs.
+The label is always drawn from the OSM centreline in `labels.geojson` (not from the dataset's mask rasters), as a band of the given width.
+
+| Name here | Trial | Target the model is trained on | Weights |
+|---|---|---|---|
+| Band model | T2 | OSM centreline + 3 m each side (6 m band, about 20 px), the final model of section 12 | `research/runs/T2_full/` |
+| Narrow-target model | T7 | centreline + 1 m each side (2 m strip, about 7 px) | `research/runs/T7_narrow/` (best epoch 7 of 10, 12 min 26 s) |
+| 3-pixel model | T8 | centreline + 0.45 m each side (about 0.9 m, 3 px) | `research/runs/T8_3px/` (best epoch 10 of 10, 10 min 34 s) |
+| 1-pixel model | T9 | centreline + 0.15 m each side (about 0.3 m, 1 px) | `research/runs/T9_1px/` (best epoch 10 of 10, 10 min 18 s) |
+
+Each model's pixel score on its own masks is not comparable with the band model's 0.465 because the target differs (T7 IoU 0.270 and F1 0.425
+at threshold 0.3; T8 IoU 0.150 and F1 0.262 at 0.2; T9 IoU 0.060 and F1 0.113 at 0.3); the models are compared with the line scores below.
+T8 and T9 were still improving at epoch 10 (validation loss), so a longer run might change them; T3 (section 12) showed no gain from a longer run
+for the band model only.
+
+**Method.** The road probability is cut at a threshold (0.3 here), thinned to a one-pixel line with `skimage.morphology.skeletonize`
+(set `P`), and compared with the OSM centreline drawn one pixel wide (set `R`), both on the model's pixel grid (about 0.30 m per pixel;
+each chip uses its own metres per pixel). With `d_R(x)` the distance in metres from pixel `x` to the nearest pixel of `R` (a Euclidean
+distance transform) and `d_P(x)` likewise for `P`, and a tolerance `r` in metres, counts pooled over all chips:
+
+```
+precision(r) = |{p in P : d_R(p) <= r}| / |P|
+recall(r)    = |{q in R : d_P(q) <= r}| / |R|
+F1           = 2 * precision * recall / (precision + recall)
+quality(r)   = TPr / (TPr + FP + FN)    TPr = matched reference pixels, FP = |P| - matched predicted pixels, FN = |R| - TPr
+IoU(r)       = |A and B| / |A or B|     A = {x : d_P(x) <= r}, B = {x : d_R(x) <= r}   (both lines widened by r on each side)
+```
+
+`r = 1 m` means a point counts as matched if the other line passes within 1 m of it, on either side (a corridor 2 m wide). Pixel counts
+stand in for lengths (a diagonal step is about 1.4 pixels; the same bias is on both lines). Matching is not one to one: one reference pixel
+can vouch for several predicted pixels. The IoU of widened lines is the overlap an IoU metric on "centreline plus buffer" polygons would see;
+it is not the pixel IoU of section 12.
+
+**Reference rows** (same chips): the OSM line against itself (must be 1.0; it is), the OSM line moved by `d` metres in a random direction
+per chip, and the dataset's own 6 m band thinned to a line (what thinning alone loses). F1 / IoU of widened lines:
+
+| Reference | r = 0.5 m | r = 1 m | r = 2 m | r = 3 m |
+|---|---|---|---|---|
+| Perfect 6 m band, thinned | 0.840 / 0.620 | 0.900 / 0.753 | 0.954 / 0.855 | 0.975 / 0.890 |
+| OSM line moved 0.5 m | 0.840 / 0.532 | 0.999 / 0.741 | 0.999 / 0.856 | 1.000 / 0.903 |
+| OSM line moved 1 m | 0.359 / 0.248 | 0.930 / 0.542 | 0.997 / 0.733 | 0.998 / 0.815 |
+| OSM line moved 2 m | 0.167 / 0.093 | 0.362 / 0.252 | 0.921 / 0.525 | 0.994 / 0.659 |
+| OSM line moved 3 m | 0.121 / 0.063 | 0.243 / 0.142 | 0.490 / 0.370 | 0.936 / 0.535 |
+
+**Results**, validation, threshold 0.3 (P precision, R recall, Qual quality, IoU of the widened lines):
+
+| Tolerance r (m) | Band P | Band R | Band F1 | Band Qual | Band IoU | Narrow P | Narrow R | Narrow F1 | Narrow Qual | Narrow IoU |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0.5 | 0.225 | 0.232 | 0.228 | 0.129 | 0.124 | 0.257 | 0.231 | 0.243 | 0.139 | 0.133 |
+| 1 | 0.412 | 0.428 | 0.420 | 0.265 | 0.235 | 0.461 | 0.418 | 0.439 | 0.282 | 0.245 |
+| 1.5 | 0.503 | 0.522 | 0.512 | 0.344 | 0.295 | 0.558 | 0.507 | 0.531 | 0.363 | 0.305 |
+| 2 | 0.600 | 0.620 | 0.610 | 0.438 | 0.363 | 0.655 | 0.599 | 0.626 | 0.458 | 0.370 |
+| 3 | 0.695 | 0.709 | 0.702 | 0.538 | 0.440 | 0.741 | 0.684 | 0.711 | 0.555 | 0.442 |
+| 4 | 0.742 | 0.752 | 0.747 | 0.593 | 0.488 | 0.776 | 0.724 | 0.749 | 0.603 | 0.486 |
+
+**All four models** (F1 of the thinned line; each model at the threshold of the sweep that is best by F1 at 1 m on validation, and at 0.3 for
+comparison). The thin targets need a far lower threshold: their probability maps are small and peaked, so 0.3 cuts away most of the line.
+
+| Model | Threshold | r = 0.5 m | r = 1 m | r = 2 m | r = 3 m | r = 4 m | Predicted line pixels |
+|---|---|---|---|---|---|---|---|
+| Band (T2) | 0.7 (end of the sweep) | 0.235 | 0.431 | 0.624 | 0.717 | 0.760 | 336,710 |
+| Band (T2) | 0.3 | 0.228 | 0.420 | 0.610 | 0.702 | 0.747 | 362,418 |
+| Narrow-target, 2 m (T7) | 0.4 | 0.244 | 0.439 | 0.627 | 0.712 | 0.750 | 305,039 |
+| 3-pixel (T8) | 0.02 | 0.234 | 0.423 | 0.608 | 0.695 | 0.738 | 307,492 |
+| 3-pixel (T8) | 0.3 | 0.229 | 0.414 | 0.596 | 0.681 | 0.723 | 235,726 |
+| 1-pixel (T9) | 0.02 | 0.207 | 0.379 | 0.551 | 0.636 | 0.683 | 273,346 |
+| 1-pixel (T9) | 0.3 | 0.194 | 0.360 | 0.527 | 0.608 | 0.655 | 178,160 |
+
+The reference has 347,906 line pixels. The sweeps are in `research/runs/centreline/val_T2_T7_T8_T9.json` (0.1 to 0.7) and `val_T8_T9_lowthr.json`
+(0.01 to 0.1); T8 and T9 are flat from 0.02 to 0.1 (within 0.003 F1 at 1 m) and lower at 0.01.
+
+**Narrower targets.** From the 6 m band to the 2 m strip to the 3-pixel strip the F1 stays within about 0.02 of each other at every tolerance
+(1 m: 0.431, 0.439, 0.423 at their best thresholds), which is within what one seed can tell apart; the 2 m strip is the highest at 0.5 to 2 m. The
+1-pixel line is clearly worse (0.379 at 1 m, 0.05 to 0.08 below the others at 2 to 4 m): a target that thin leaves almost every pixel as
+background, the training loss is still 0.93 after 10 epochs, and the model finds less of the road (recall 0.34 against 0.40 to 0.43 at 1 m).
+The median offset to the OSM line is 0.85 to 0.95 m for all four models, whatever the target; that points to the alignment of the hand-drawn
+OSM lines (and the thinning, 0.35 m for a perfect band) as a floor that a narrower target does not remove, but the numbers here cannot separate it from model error.
+
+Median distance from a predicted line pixel to the OSM line (pixels within 5 m of it) at 0.3: 0.95 m (band model), 0.85 m (narrow-target model).
+Predicted line length: 362,418 pixels (band), 311,762 (narrow-target), against 347,906 reference pixels. The scores at thresholds 0.2 to 0.7
+are in `research/runs/centreline/val_T2_T7.json`; F1 moves by about 0.02 across that range (0.017 to 0.022 for the band model at 1 to 3 m), and the band model's F1 was still rising
+slightly at 0.7, the end of the sweep.
+
+**Reading.**
+
+- Thinning alone costs little at a wide tolerance (perfect band, F1 0.954 at 2 m) and a lot at a tight one (0.840 at 0.5 m): a 0.5 m tolerance
+  is about 1.7 pixels, so even a perfect label thinned fails it. The 0.5 m scores of the models (0.23 to 0.24) are mostly that.
+- The tolerance F1 forgives an offset up to `r` (the OSM line moved 1 m still scores F1 0.93 at r = 1 m), but the IoU of widened lines does
+  not: the same moved line scores only 0.542. For two strips of width `2r` an offset `d` gives IoU = (2r - d) / (2r + d), one third at
+  `d = r`; the measured value is higher because the shift direction is random against each road. So IoU on a 1 m buffer is a harsh score:
+  about 0.24 for both models, against F1 0.42 to 0.44 at the same 1 m.
+- Narrow target against band: higher precision and lower recall at every tolerance (it draws about 14% fewer line pixels). F1 is higher by
+  0.015 to 0.019 from 0.5 to 2 m, 0.009 at 3 m and 0.002 at 4 m, so the models converge as the tolerance grows. With one seed and gaps near
+  the 0.01 bar this is a small edge at tight tolerances, not a confirmed gain. A second seed would settle it.
+- The best a thinned perfect band can score at 1 m is F1 0.900 and IoU 0.753; both models are far below it. The remaining gap is model error
+  plus unmapped roads (they lower precision) plus the alignment of hand-drawn OSM lines; these cannot be separated from these numbers.
+
+**Caveats.** One seed; validation only; Freetown is 94% of the tiles; length counted in pixels; no clean-up of short spurs on the thinned
+lines; the labels are incomplete, so precision is a lower bound; the library draws labels with PIL, which can shift a line by up to half a
+pixel (about 0.15 m), the same for every row above. Overlay sheets for 100 random chips per split, the OSM line in blue and the thinned
+prediction in red (`samples_centreline_<split>.png`, with `samples_<split>.png` and `samples_pred_<split>.png` in the layout of section 12), are in
+`research/runs/T7_narrow/overlays/` and `research/runs/T2_full/overlays_centreline/`.
+
+**Reproduce** (from `hs-hot/`, shared `HOTOSM/.venv` python): `python research/train_T7.py`, then
+`python research/analysis/centreline_eval.py --split val --model T2=research/runs/T2_full/T2_full.pt --model T7=research/runs/T7_narrow/T7_narrow.pt --out research/runs/centreline/val_T2_T7.json`.
+T8 and T9: `python research/train_T7.py --half-width-m 0.45 --out research/runs/T8_3px --name T8_3px` and `--half-width-m 0.15 ... T9_1px`;
+for them score with `--thresholds 0.01 0.02 0.03 0.05 0.075 0.1`.
+The thinning and the scoring need `scikit-image` and `scipy`: the `centreline` extra of `pyproject.toml` (floors 0.26 and 1.18, the versions
+tested), also in the `test` extra so the 9 tests of `tests/test_centreline.py` run in CI (148 tests pass in all). They were installed in the
+shared dev venv on 2026-11-10 (scikit-image 0.26.0, scipy 1.18.1 with imageio, lazy-loader and tifffile); `import hs_hot` still loads none of them.
+No `uv.lock` exists, so none was regenerated.
+
+**Draft baseline for a challenge** (`research/zindi/baseline_centreline.py`, and a `.ipynb` built from it): chips, ONNX model, thin, buffer,
+`ID,geometry` CSV of `MULTIPOLYGON` in chip pixels. It ran on 40 validation chips as a script; the notebook was not executed. The submission
+format, buffer width and metric wait for the organiser's answers.
+
+**Not done:** a second seed; longer runs for the thin targets (T8, T9 were still improving at epoch 10); the test split; spur clean-up; the band model's threshold sweep beyond 0.7; per-project scores; a check of how far
+OSM lines sit from the visible road centre; centrelines as a library output (the library returns polygon bands).
 
