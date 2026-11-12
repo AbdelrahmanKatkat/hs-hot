@@ -49,4 +49,5 @@ __all__ = [
     "predict_session",
 ]
 # Optional (train extra, import explicitly): hs_hot.export, hs_hot.unet, hs_hot.segmentation_dataset, hs_hot.train, hs_hot.evaluate
-# Optional (centreline extra, import explicitly): hs_hot.centreline, hs_hot.evaluate_centreline
+# Optional (centreline extra, import explicitly): hs_hot.centreline, hs_hot.evaluate_centreline,
+# hs_hot.road_graph, hs_hot.apls, hs_hot.topo, hs_hot.evaluate_graph (road networks and their APLS / TOPO scores)

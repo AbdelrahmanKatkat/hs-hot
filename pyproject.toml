@@ -31,7 +31,8 @@ infer = [
     "onnxruntime>=1.18",
 ]
 # Roads as centrelines (`hs_hot.centreline`, `hs_hot.evaluate_centreline`): thinning a mask to a line and scoring lines with a distance
-# tolerance. Not needed for the polygon path or for serving. The floors are the versions this was tested with.
+# tolerance; and as road networks (`hs_hot.road_graph`, `hs_hot.apls`, `hs_hot.topo`, `hs_hot.evaluate_graph`: numpy and scipy only).
+# Not needed for the polygon path or for serving. The floors are the versions this was tested with.
 centreline = [
     "scikit-image>=0.26",
     "scipy>=1.18",
