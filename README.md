@@ -70,7 +70,7 @@ network and the sigmoid are inside the graph; the threshold and the polygon step
 | `export.py` | `build_unet` (owns the checkpoints), `probability_network`, the ONNX export (`train`) |
 | `segmentation_dataset.py`, `train.py` | chips + labels as a torch dataset; fine-tuning (`train`) |
 | `evaluate.py` | pixel precision / recall / F1 / IoU, threshold sweep (torch only for `score_dataset`) |
-| `centreline.py`, `evaluate_centreline.py` | roads as lines (`centreline` extra, imported explicitly, not exported from `hs_hot`): `thin_to_centreline` (mask to a one-pixel line), `widen_centreline`, and the tolerance scores `Tally` (precision / recall / F1 / quality / IoU of widened lines within `r` metres, Theory section 13) |
+| `centreline.py`, `evaluate_centreline.py` | roads as lines (`centreline` extra, imported explicitly, not exported from `hs_hot`): `thin_to_centreline` (mask to a one-pixel line), `widen_centreline`, and the tolerance scores `Tally` (precision / recall / F1 within `r` metres, Theory section 13) |
 
 `unet`, `export`, `segmentation_dataset` and `train` need the `train` extra and are imported explicitly (`from hs_hot.train import ...`);
 `import hs_hot`, `serve`, `evaluate`, `decode` and `export` never load torch until a function that needs it is called.
@@ -128,7 +128,7 @@ are unmapped, so these are lower bounds on how well roads are found):
 
 The library returns polygon bands. If roads are scored as centrelines instead, the band is thinned to a line and compared with the OSM
 centreline within a tolerance `r` (a point matches if the other line passes within `r` metres, on either side). Validation, threshold 0.3,
-F1 of the thinned line (Theory section 13 has precision, recall, quality, the IoU of widened lines, the reference rows and the method):
+F1 of the thinned line (Theory section 13 has precision, recall, the reference rows and the method):
 
 | Tolerance r | 0.5 m | 1 m | 2 m | 3 m |
 |---|---|---|---|---|

@@ -6,12 +6,8 @@ reference line `R` (the OSM centreline, `draw_lines`). With `d_R(x)` the distanc
 
     precision(r) = |{p in P : d_R(p) <= r}| / |P|        recall(r) = |{q in R : d_P(q) <= r}| / |R|
     F1           = 2 * precision * recall / (precision + recall)
-    quality(r)   = TPr / (TPr + FP + FN)   TPr = matched reference pixels, FP = |P| - matched predicted, FN = |R| - TPr
-    IoU(r)       = |A and B| / |A or B|    A = {x : d_P(x) <= r}, B = {x : d_R(x) <= r}   (both lines widened by r on each side)
 
-`quality` is a custom score in the style of the completeness / correctness / quality measures of road-extraction evaluation. It is NOT a Jaccard or IoU:
-its true-positive count comes from the reference side (matched reference pixels) while its false positives come from the prediction side, so the two sides
-need not agree. The IoU-type score is `buffered_iou`; if an F1-derived Jaccard is wanted it is F1 / (2 - F1) of the same counts.
+If a Jaccard-type number is wanted it is F1 / (2 - F1) of the same counts.
 `median_offset_m` is the median distance from predicted pixels to the reference line, taken from a histogram with 0.1 m bins: it is the mean distance inside
 the bin that holds the median (so identical lines give exactly 0), not an exact median, and it uses only the predicted pixels within 5 m of the reference
 (`share_within_5m` says how many that is; the rest are in the last bin and do not enter).
@@ -88,8 +84,6 @@ class Tally:
         self.n_ref = 0
         self.pred_within = np.zeros(len(self.radii))
         self.ref_within = np.zeros(len(self.radii))
-        self.inter = np.zeros(len(self.radii))
-        self.union = np.zeros(len(self.radii))
         self.hist = np.zeros(
             int(HIST_MAX_M / HIST_BIN_M) + 1
         )  # the last bin holds everything farther than HIST_MAX_M
@@ -112,9 +106,6 @@ class Tally:
         for i, radius in enumerate(self.radii):
             self.pred_within[i] += (pred_to_ref <= radius).sum()
             self.ref_within[i] += (ref_to_pred <= radius).sum()
-            near_pred, near_ref = d_pred <= radius, d_ref <= radius
-            self.inter[i] += (near_pred & near_ref).sum()
-            self.union[i] += (near_pred | near_ref).sum()
         bins = np.minimum(pred_to_ref / HIST_BIN_M, len(self.hist) - 1).astype(int)
         self.hist += np.bincount(bins, minlength=len(self.hist))
         self.hist_sum += np.bincount(bins, weights=pred_to_ref, minlength=len(self.hist))
@@ -126,14 +117,10 @@ class Tally:
             precision = self.pred_within[i] / self.n_pred if self.n_pred else 0.0
             recall = self.ref_within[i] / self.n_ref if self.n_ref else 0.0
             f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-            false_pos, false_neg = self.n_pred - self.pred_within[i], self.n_ref - self.ref_within[i]
-            denominator = self.ref_within[i] + false_pos + false_neg
             result[f"r{radius:g}"] = {
                 "precision": round(float(precision), 4),
                 "recall": round(float(recall), 4),
                 "f1": round(float(f1), 4),
-                "quality": round(float(self.ref_within[i] / denominator) if denominator else 0.0, 4),
-                "buffered_iou": round(float(self.inter[i] / self.union[i]) if self.union[i] else 0.0, 4),
             }
         matched = self.hist[:-1]
         if matched.sum():

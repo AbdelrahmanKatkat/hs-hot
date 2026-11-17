@@ -272,14 +272,17 @@ distance transform) and `d_P(x)` likewise for `P`, and a tolerance `r` in metres
 precision(r) = |{p in P : d_R(p) <= r}| / |P|
 recall(r)    = |{q in R : d_P(q) <= r}| / |R|
 F1           = 2 * precision * recall / (precision + recall)
-quality(r)   = TPr / (TPr + FP + FN)    TPr = matched reference pixels, FP = |P| - matched predicted pixels, FN = |R| - TPr
-IoU(r)       = |A and B| / |A or B|     A = {x : d_P(x) <= r}, B = {x : d_R(x) <= r}   (both lines widened by r on each side)
 ```
+
+Two scores were removed from the scorer on 2026-11-16, because the challenge and the road-network work score the line F1, APLS and TOPO only:
+the IoU of widened lines (`|A and B| / |A or B|`, `A = {x : d_P(x) <= r}`, `B = {x : d_R(x) <= r}`) and the custom `quality`
+(`TPr / (TPr + FP + FN)`, matched reference pixels against unmatched predicted and reference pixels; not a true IoU because its two counts come
+from different sides). The Qual and IoU columns in the tables below were measured before that.
 
 `r = 1 m` means a point counts as matched if the other line passes within 1 m of it, on either side (a corridor 2 m wide). Pixel counts
 stand in for lengths (a diagonal step is about 1.4 pixels; the same bias is on both lines). Matching is not one to one: one reference pixel
-can vouch for several predicted pixels. The IoU of widened lines is the overlap an IoU metric on "centreline plus buffer" polygons would see;
-it is not the pixel IoU of section 12.
+can vouch for several predicted pixels. The (removed) IoU of widened lines was the overlap an IoU metric on "centreline plus buffer" polygons
+would see; it is not the pixel IoU of section 12.
 
 **Reference rows** (same chips): the OSM line against itself (must be 1.0; it is), the OSM line moved by `d` metres in a random direction
 per chip, and the dataset's own 6 m band thinned to a line (what thinning alone loses). F1 / IoU of widened lines:

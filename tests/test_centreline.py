@@ -53,8 +53,7 @@ def test_a_line_scored_against_itself_is_perfect():
     tally.add(_line(10), _line(10), 0.3)
     for radius in ("r0.5", "r1", "r4"):
         scores = tally.summary()[radius]
-        assert scores["precision"] == scores["recall"] == scores["f1"] == scores["quality"] == 1.0
-        assert scores["buffered_iou"] == 1.0
+        assert scores["precision"] == scores["recall"] == scores["f1"] == 1.0
 
 
 def test_an_offset_inside_the_tolerance_matches_and_outside_it_does_not():
@@ -62,9 +61,6 @@ def test_an_offset_inside_the_tolerance_matches_and_outside_it_does_not():
     tally.add(_line(14), _line(10), 0.25)  # 4 pixels = 1.0 m apart
     summary = tally.summary()
     assert summary["r1"]["f1"] == 1.0 and summary["r0.5"]["f1"] == 0.0
-    assert summary["r1"]["buffered_iou"] == pytest.approx(
-        5 / 13, abs=1e-3
-    )  # (scores are rounded to 4 decimals) strips of 9 rows, 5 of them shared, 13 in the union
     assert 1.0 <= summary["median_offset_m"] <= 1.1
 
 
@@ -87,8 +83,6 @@ def test_empty_prediction_empty_reference_and_both_empty_do_not_divide_by_zero()
         "precision": 0.0,
         "recall": 0.0,
         "f1": 0.0,
-        "quality": 0.0,
-        "buffered_iou": 0.0,
     }
 
 
